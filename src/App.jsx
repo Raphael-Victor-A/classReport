@@ -145,7 +145,7 @@ function Sidebar({ page, setPage, dark, setDark, user, mobile, open, setOpen, on
           <div style={{ width: 36, height: 36, background: "#25D366", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📋</div>
           <div>
             <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 16, color: text, letterSpacing: -0.5 }}>ClassReport</div>
-            <div style={{ fontSize: 11, color: sub }}>by Ctrl+Play</div>
+            <div style={{ fontSize: 11, color: sub }}>by Raphael Alencar</div>
           </div>
         </div>
       </div>

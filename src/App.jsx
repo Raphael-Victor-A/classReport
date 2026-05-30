@@ -38,7 +38,7 @@ function gerarMensagem(r) {
 
 // ─── AI SERVICE ──────────────────────────────────────────────────────────────
 async function gerarTextoIA({ numeroAula, titulo, turma, objetivos, tarefa }) {
-  const prompt = `Você é um professor de tecnologia. Escreva exatamente 2 parágrafos curtos (máximo 2 frases cada) para o relatório desta aula. Linguagem formal e pedagógica. SEM introduções, saudações ou conclusões. Apenas os 2 parágrafos.
+  const prompt = `Você é um professor de tecnologia. Escreva EXATAMENTE 2 parágrafos completos sobre esta aula. Cada parágrafo deve ter 2-3 frases completas. Não corte as frases no meio. Linguagem formal e pedagógica. Responda APENAS com os 2 parágrafos, sem títulos, saudações ou listas.
 
 Aula ${numeroAula} – ${titulo} | Turma: ${turma}
 Objetivos: ${objetivos.join("; ")}${tarefa ? ` | Tarefa: ${tarefa}` : ""}`;
@@ -50,7 +50,7 @@ Objetivos: ${objetivos.join("; ")}${tarefa ? ` | Tarefa: ${tarefa}` : ""}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 300, temperature: 0.7 },
+        generationConfig: { maxOutputTokens: 650, temperature: 0.7 },
       }),
     }
   );

@@ -1,27 +1,23 @@
 import { useState, useEffect, useRef } from "react";
-
-// ─── MOCK DATA ───────────────────────────────────────────────────────────────
-const MOCK_USER = { name: "Prof. João Silva", email: "joao@ctrlplay.com.br", team: "Equipe Ctrl+Play" };
-
-const INITIAL_REPORTS = [
-  {
-    id: "r1", numeroAula: "11", titulo: "Autorização e Controle de Acesso com JWT",
-    turma: "CY4", equipe: "Equipe Ctrl+Play", data: "2024-11-15",
-    objetivos: ["Implementar controle de acesso baseado em roles", "Criar middleware para validação de permissões", "Proteger rotas para acesso de usuários autorizados"],
-    tarefa: "Desenvolver uma rota protegida utilizando middleware de autenticação",
-    anexo: "jwt-exercicio.pdf",
-    textoIA: "Nesta aula, os alunos avançaram no desenvolvimento do sistema de autenticação utilizando JWT. Foram implementados diferentes níveis de acesso e realizado o controle de permissões através de middlewares.\n\nTambém foram realizados testes utilizando o Postman para validar o comportamento das rotas protegidas.",
-    criadoEm: "2024-11-15T10:30:00",
-  },
-  {
-    id: "r2", numeroAula: "12", titulo: "Introdução ao Docker",
-    turma: "CK2", equipe: "Equipe Ctrl+Play", data: "2024-11-18",
-    objetivos: ["Conceitos fundamentais de containerização", "Criar e executar containers Docker", "Gerenciar imagens e volumes"],
-    tarefa: "", anexo: "",
-    textoIA: "Nesta aula foi apresentado o Docker como ferramenta de containerização. Os alunos criaram seus primeiros containers e aprenderam a gerenciar imagens Docker através do terminal.",
-    criadoEm: "2024-11-18T14:00:00",
-  },
-];
+import { auth, db } from "./firebase";
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
+  onAuthStateChanged,
+  updateProfile,
+} from "firebase/auth";
+import {
+  collection,
+  addDoc,
+  getDocs,
+  deleteDoc,
+  doc,
+  query,
+  orderBy,
+} from "firebase/firestore";
 
 // ─── UTILS ───────────────────────────────────────────────────────────────────
 function formatData(iso) {
@@ -35,13 +31,12 @@ function gerarMensagem(r) {
   r.objetivos.forEach(o => { msg += `• ${o}\n`; });
   msg += `\n${r.textoIA}\n`;
   if (r.tarefa) msg += `\nTarefa:\n${r.tarefa}\n`;
-  if (r.anexo) msg += `\nAnexo:\n${r.anexo}\n`;
+  if (r.anexo)  msg += `\nAnexo:\n${r.anexo}\n`;
   msg += `\nAtenciosamente,\n${r.equipe}`;
   return msg;
 }
 
 // ─── AI SERVICE ──────────────────────────────────────────────────────────────
-// FIX 2: prompt mais conciso, max_tokens reduzido e instrução explícita de brevidade
 async function gerarTextoIA({ numeroAula, titulo, turma, objetivos, tarefa }) {
   const prompt = `Você é um professor de tecnologia. Escreva exatamente 2 parágrafos curtos (máximo 2 frases cada) para o relatório desta aula. Linguagem formal e pedagógica. SEM introduções, saudações ou conclusões. Apenas os 2 parágrafos.
 
@@ -59,6 +54,12 @@ Objetivos: ${objetivos.join("; ")}${tarefa ? ` | Tarefa: ${tarefa}` : ""}`;
       }),
     }
   );
+
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({}));
+    throw new Error(err?.error?.message || `HTTP ${resp.status}`);
+  }
+
   const data = await resp.json();
   return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Texto não gerado.";
 }
@@ -90,80 +91,6 @@ function useToast() {
   return { toasts, add, remove };
 }
 
-// ─── SIDEBAR ─────────────────────────────────────────────────────────────────
-// FIX 1: recebe onLogout e exibe botão de logout
-function Sidebar({ page, setPage, dark, setDark, user, mobile, open, setOpen, onLogout }) {
-  const items = [
-    { id: "dashboard", icon: "⊞", label: "Dashboard" },
-    { id: "gerar",     icon: "✦", label: "Gerar Relatório" },
-    { id: "historico", icon: "◎", label: "Histórico" },
-    { id: "config",    icon: "⚙", label: "Configurações" },
-  ];
-
-  const bg       = dark ? "#0f172a" : "#fff";
-  const border   = dark ? "#1e293b" : "#e5e7eb";
-  const text     = dark ? "#e2e8f0" : "#1e293b";
-  const sub      = dark ? "#64748b" : "#94a3b8";
-  const active   = dark ? "#dcfce7" : "#166534";
-  const activeBg = dark ? "#14532d" : "#dcfce7";
-
-  const content = (
-    <div style={{ width: mobile ? "80vw" : 240, maxWidth: 280, background: bg, borderRight: `1px solid ${border}`, height: "100vh", display: "flex", flexDirection: "column", padding: "0 0 24px" }}>
-      {/* Logo */}
-      <div style={{ padding: "28px 24px 20px", borderBottom: `1px solid ${border}` }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, background: "#25D366", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📋</div>
-          <div>
-            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 16, color: text, letterSpacing: -0.5 }}>ClassReport</div>
-            <div style={{ fontSize: 11, color: sub }}>by Ctrl+Play</div>
-          </div>
-        </div>
-      </div>
-
-      {/* Nav */}
-      <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
-        {items.map(it => (
-          <button key={it.id} onClick={() => { setPage(it.id); if (mobile) setOpen(false); }}
-            style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer", textAlign: "left", width: "100%", background: page === it.id ? activeBg : "transparent", color: page === it.id ? active : text, fontWeight: page === it.id ? 700 : 500, fontSize: 14, transition: "all .15s" }}>
-            <span style={{ fontSize: 16, opacity: 0.8 }}>{it.icon}</span>
-            {it.label}
-          </button>
-        ))}
-      </nav>
-
-      {/* User + logout */}
-      <div style={{ padding: "0 16px" }}>
-        <div style={{ borderTop: `1px solid ${border}`, paddingTop: 16 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <div style={{ width: 34, height: 34, background: "#25D366", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
-              {user.name[0]}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 13, fontWeight: 600, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.name}</div>
-              <div style={{ fontSize: 11, color: sub }}>Professor</div>
-            </div>
-            <button onClick={() => setDark(!dark)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, padding: 4, flexShrink: 0 }} title="Dark mode">
-              {dark ? "☀️" : "🌙"}
-            </button>
-          </div>
-          {/* LOGOUT BUTTON */}
-          <button onClick={onLogout} style={{ width: "100%", padding: "9px 14px", borderRadius: 9, border: `1.5px solid ${dark ? "#334155" : "#e2e8f0"}`, background: "transparent", color: "#ef4444", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
-            ⏻ Sair
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-
-  if (!mobile) return content;
-  return (
-    <>
-      {open && <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />}
-      <div style={{ position: "fixed", left: open ? 0 : "-100vw", top: 0, zIndex: 100, transition: "left .25s ease" }}>{content}</div>
-    </>
-  );
-}
-
 // ─── SHARED COMPONENTS ───────────────────────────────────────────────────────
 function Card({ dark, children, style = {} }) {
   return (
@@ -186,6 +113,216 @@ function Btn({ onClick, children, color = "#25D366", textColor = "#fff", outline
   );
 }
 
+// ─── SIDEBAR ─────────────────────────────────────────────────────────────────
+function Sidebar({ page, setPage, dark, setDark, user, mobile, open, setOpen, onLogout }) {
+  const items = [
+    { id: "dashboard", icon: "⊞", label: "Dashboard" },
+    { id: "gerar",     icon: "✦", label: "Gerar Relatório" },
+    { id: "historico", icon: "◎", label: "Histórico" },
+    { id: "config",    icon: "⚙", label: "Configurações" },
+  ];
+
+  const bg       = dark ? "#0f172a" : "#fff";
+  const border   = dark ? "#1e293b" : "#e5e7eb";
+  const text     = dark ? "#e2e8f0" : "#1e293b";
+  const sub      = dark ? "#64748b" : "#94a3b8";
+  const active   = dark ? "#dcfce7" : "#166534";
+  const activeBg = dark ? "#14532d" : "#dcfce7";
+
+  const displayName = user.displayName || user.email?.split("@")[0] || "Usuário";
+  const avatar      = user.photoURL ? (
+    <img src={user.photoURL} alt="" style={{ width: 34, height: 34, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }} />
+  ) : (
+    <div style={{ width: 34, height: 34, background: "#25D366", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontWeight: 700, fontSize: 14, flexShrink: 0 }}>
+      {displayName[0].toUpperCase()}
+    </div>
+  );
+
+  const content = (
+    <div style={{ width: mobile ? "80vw" : 240, maxWidth: 280, background: bg, borderRight: `1px solid ${border}`, height: "100vh", display: "flex", flexDirection: "column", padding: "0 0 24px" }}>
+      <div style={{ padding: "28px 24px 20px", borderBottom: `1px solid ${border}` }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ width: 36, height: 36, background: "#25D366", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 18 }}>📋</div>
+          <div>
+            <div style={{ fontFamily: "'Syne', sans-serif", fontWeight: 800, fontSize: 16, color: text, letterSpacing: -0.5 }}>ClassReport</div>
+            <div style={{ fontSize: 11, color: sub }}>by Ctrl+Play</div>
+          </div>
+        </div>
+      </div>
+
+      <nav style={{ flex: 1, padding: "16px 12px", display: "flex", flexDirection: "column", gap: 4 }}>
+        {items.map(it => (
+          <button key={it.id} onClick={() => { setPage(it.id); if (mobile) setOpen(false); }}
+            style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 12px", borderRadius: 10, border: "none", cursor: "pointer", textAlign: "left", width: "100%", background: page === it.id ? activeBg : "transparent", color: page === it.id ? active : text, fontWeight: page === it.id ? 700 : 500, fontSize: 14, transition: "all .15s" }}>
+            <span style={{ fontSize: 16, opacity: 0.8 }}>{it.icon}</span>
+            {it.label}
+          </button>
+        ))}
+      </nav>
+
+      <div style={{ padding: "0 16px" }}>
+        <div style={{ borderTop: `1px solid ${border}`, paddingTop: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            {avatar}
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{displayName}</div>
+              <div style={{ fontSize: 11, color: sub, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{user.email}</div>
+            </div>
+            <button onClick={() => setDark(!dark)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, padding: 4, flexShrink: 0 }} title="Dark mode">
+              {dark ? "☀️" : "🌙"}
+            </button>
+          </div>
+          <button onClick={onLogout} style={{ width: "100%", padding: "9px 14px", borderRadius: 9, border: `1.5px solid ${dark ? "#334155" : "#e2e8f0"}`, background: "transparent", color: "#ef4444", fontSize: 13, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+            ⏻ Sair
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (!mobile) return content;
+  return (
+    <>
+      {open && <div onClick={() => setOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 99 }} />}
+      <div style={{ position: "fixed", left: open ? 0 : "-100vw", top: 0, zIndex: 100, transition: "left .25s ease" }}>{content}</div>
+    </>
+  );
+}
+
+// ─── LOGIN / CADASTRO ────────────────────────────────────────────────────────
+function AuthScreen({ dark }) {
+  const [tab, setTab]         = useState("login"); // "login" | "cadastro"
+  const [email, setEmail]     = useState("");
+  const [senha, setSenha]     = useState("");
+  const [nome, setNome]       = useState("");
+  const [loading, setLoading] = useState(false);
+  const [erro, setErro]       = useState("");
+
+  const bg          = dark ? "#0f172a" : "#f8fafc";
+  const cardBg      = dark ? "#1e293b" : "#fff";
+  const text        = dark ? "#e2e8f0" : "#1e293b";
+  const sub         = dark ? "#94a3b8" : "#64748b";
+  const inputBg     = dark ? "#0f172a" : "#f8fafc";
+  const inputBorder = dark ? "#334155" : "#e2e8f0";
+  const borderColor = dark ? "#334155" : "#e5e7eb";
+
+  const inputStyle = {
+    width: "100%", padding: "12px 14px", borderRadius: 10,
+    border: `1.5px solid ${inputBorder}`, background: inputBg,
+    color: text, fontSize: 14, outline: "none", boxSizing: "border-box",
+  };
+
+  const mensagemErro = (code) => {
+    const mapa = {
+      "auth/email-already-in-use":    "Este e-mail já está cadastrado.",
+      "auth/invalid-email":           "E-mail inválido.",
+      "auth/weak-password":           "Senha muito fraca (mínimo 6 caracteres).",
+      "auth/user-not-found":          "Usuário não encontrado.",
+      "auth/wrong-password":          "Senha incorreta.",
+      "auth/invalid-credential":      "E-mail ou senha incorretos.",
+      "auth/popup-closed-by-user":    "Login com Google cancelado.",
+      "auth/too-many-requests":       "Muitas tentativas. Tente novamente em alguns minutos.",
+    };
+    return mapa[code] || "Ocorreu um erro. Tente novamente.";
+  };
+
+  const handleEmailAuth = async () => {
+    setErro(""); setLoading(true);
+    try {
+      if (tab === "cadastro") {
+        if (!nome.trim()) { setErro("Digite seu nome."); setLoading(false); return; }
+        const cred = await createUserWithEmailAndPassword(auth, email, senha);
+        await updateProfile(cred.user, { displayName: nome.trim() });
+      } else {
+        await signInWithEmailAndPassword(auth, email, senha);
+      }
+    } catch (e) {
+      setErro(mensagemErro(e.code));
+    }
+    setLoading(false);
+  };
+
+  const handleGoogle = async () => {
+    setErro(""); setLoading(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (e) {
+      setErro(mensagemErro(e.code));
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+      <div style={{ width: "100%", maxWidth: 420 }}>
+        {/* Logo */}
+        <div style={{ textAlign: "center", marginBottom: 32 }}>
+          <div style={{ width: 60, height: 60, background: "#25D366", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>📋</div>
+          <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 28, color: text, margin: "0 0 6px", letterSpacing: -1 }}>ClassReport</h1>
+          <p style={{ color: sub, margin: 0, fontSize: 14 }}>Sistema de Relatórios de Aulas</p>
+        </div>
+
+        <div style={{ background: cardBg, borderRadius: 16, padding: 28, border: `1px solid ${borderColor}` }}>
+          {/* Tabs */}
+          <div style={{ display: "flex", background: dark ? "#0f172a" : "#f1f5f9", borderRadius: 10, padding: 4, marginBottom: 24 }}>
+            {["login", "cadastro"].map(t => (
+              <button key={t} onClick={() => { setTab(t); setErro(""); }}
+                style={{ flex: 1, padding: "9px", borderRadius: 8, border: "none", cursor: "pointer", fontSize: 14, fontWeight: 600, transition: "all .15s",
+                  background: tab === t ? (dark ? "#1e293b" : "#fff") : "transparent",
+                  color: tab === t ? text : sub,
+                  boxShadow: tab === t ? "0 1px 4px rgba(0,0,0,0.1)" : "none",
+                }}>
+                {t === "login" ? "Entrar" : "Criar Conta"}
+              </button>
+            ))}
+          </div>
+
+          {/* Google */}
+          <button onClick={handleGoogle} disabled={loading} style={{ width: "100%", padding: "12px", background: dark ? "#0f172a" : "#f8fafc", color: text, border: `1.5px solid ${inputBorder}`, borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 20, opacity: loading ? 0.6 : 1 }}>
+            <svg width="18" height="18" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.18 1.48-4.97 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+            Continuar com Google
+          </button>
+
+          {/* Divisor */}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20 }}>
+            <div style={{ flex: 1, height: 1, background: borderColor }} />
+            <span style={{ fontSize: 12, color: sub }}>ou</span>
+            <div style={{ flex: 1, height: 1, background: borderColor }} />
+          </div>
+
+          {/* Formulário */}
+          {tab === "cadastro" && (
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: sub, display: "block", marginBottom: 6 }}>Nome completo</label>
+              <input style={inputStyle} value={nome} onChange={e => setNome(e.target.value)} placeholder="Seu nome" />
+            </div>
+          )}
+          <div style={{ marginBottom: 14 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: sub, display: "block", marginBottom: 6 }}>E-mail</label>
+            <input style={inputStyle} value={email} onChange={e => setEmail(e.target.value)} placeholder="seu@email.com" type="email" />
+          </div>
+          <div style={{ marginBottom: 22 }}>
+            <label style={{ fontSize: 12, fontWeight: 600, color: sub, display: "block", marginBottom: 6 }}>Senha{tab === "cadastro" ? " (mín. 6 caracteres)" : ""}</label>
+            <input type="password" style={inputStyle} value={senha} onChange={e => setSenha(e.target.value)} placeholder="••••••"
+              onKeyDown={e => e.key === "Enter" && handleEmailAuth()} />
+          </div>
+
+          {erro && (
+            <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#dc2626" }}>
+              {erro}
+            </div>
+          )}
+
+          <button onClick={handleEmailAuth} disabled={loading} style={{ width: "100%", padding: "13px", background: "#25D366", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: loading ? "not-allowed" : "pointer", opacity: loading ? 0.7 : 1 }}>
+            {loading ? "⏳ Aguarde..." : tab === "login" ? "Entrar" : "Criar Conta"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── DASHBOARD ───────────────────────────────────────────────────────────────
 function Dashboard({ dark, reports, setPage }) {
   const text = dark ? "#e2e8f0" : "#1e293b";
@@ -198,9 +335,9 @@ function Dashboard({ dark, reports, setPage }) {
   const turmasUnicas = [...new Set(reports.map(r => r.turma))].length;
 
   const stats = [
-    { icon: "📊", label: "Relatórios Gerados",  value: reports.length, color: "#3b82f6" },
-    { icon: "👥", label: "Turmas Utilizadas",    value: turmasUnicas,   color: "#8b5cf6" },
-    { icon: "📅", label: "Relatórios Este Mês",  value: thisMonth,      color: "#25D366" },
+    { icon: "📊", label: "Relatórios Gerados", value: reports.length, color: "#3b82f6" },
+    { icon: "👥", label: "Turmas Utilizadas",   value: turmasUnicas,  color: "#8b5cf6" },
+    { icon: "📅", label: "Este Mês",            value: thisMonth,     color: "#25D366" },
   ];
 
   return (
@@ -247,8 +384,6 @@ function Dashboard({ dark, reports, setPage }) {
 }
 
 // ─── GERAR RELATÓRIO ─────────────────────────────────────────────────────────
-// FIX 3: campo turma vira input de texto livre
-// FIX 4: upload de arquivo real com preview do nome
 function GerarRelatorio({ dark, onSave, toast }) {
   const text        = dark ? "#e2e8f0" : "#1e293b";
   const sub         = dark ? "#94a3b8" : "#64748b";
@@ -259,7 +394,7 @@ function GerarRelatorio({ dark, onSave, toast }) {
   const [loading, setLoading] = useState(false);
   const [textoIA, setTextoIA] = useState("");
   const [copied, setCopied]   = useState(false);
-  const [arquivo, setArquivo] = useState(null); // File object
+  const [arquivo, setArquivo] = useState(null);
   const fileRef               = useRef(null);
 
   const [form, setForm] = useState({
@@ -271,9 +406,9 @@ function GerarRelatorio({ dark, onSave, toast }) {
   const inputStyle = { width: "100%", padding: "10px 14px", borderRadius: 9, border: `1.5px solid ${inputBorder}`, background: inputBg, color: text, fontSize: 14, outline: "none", boxSizing: "border-box" };
   const labelStyle = { fontSize: 13, fontWeight: 600, color: sub, marginBottom: 6, display: "block" };
 
-  const setField      = (k, v) => setForm(p => ({ ...p, [k]: v }));
-  const addObjetivo   = () => setForm(p => ({ ...p, objetivos: [...p.objetivos, ""] }));
-  const setObjetivo   = (i, v) => setForm(p => { const o = [...p.objetivos]; o[i] = v; return { ...p, objetivos: o }; });
+  const setField       = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const addObjetivo    = () => setForm(p => ({ ...p, objetivos: [...p.objetivos, ""] }));
+  const setObjetivo    = (i, v) => setForm(p => { const o = [...p.objetivos]; o[i] = v; return { ...p, objetivos: o }; });
   const removeObjetivo = i => setForm(p => ({ ...p, objetivos: p.objetivos.filter((_, x) => x !== i) }));
 
   const valid = form.numeroAula && form.titulo && form.turma.trim() && form.equipe && form.objetivos.some(o => o.trim());
@@ -286,13 +421,13 @@ function GerarRelatorio({ dark, onSave, toast }) {
       setTextoIA(t);
       setStep(2);
     } catch (e) {
-      toast("Erro ao gerar texto. Verifique sua conexão.", "error");
+      toast(`Erro Gemini: ${e.message}`, "error");
     }
     setLoading(false);
   };
 
-  const nomeAnexo  = arquivo ? arquivo.name : "";
-  const mensagem   = gerarMensagem({ ...form, objetivos: form.objetivos.filter(o => o.trim()), textoIA, anexo: nomeAnexo });
+  const nomeAnexo = arquivo ? arquivo.name : "";
+  const mensagem  = gerarMensagem({ ...form, objetivos: form.objetivos.filter(o => o.trim()), textoIA, anexo: nomeAnexo });
 
   const copiar = () => {
     navigator.clipboard.writeText(mensagem);
@@ -300,39 +435,36 @@ function GerarRelatorio({ dark, onSave, toast }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  const salvar = () => {
-    onSave({
-      id: "r" + Date.now(), ...form,
+  const salvar = async () => {
+    await onSave({
+      ...form,
       objetivos: form.objetivos.filter(o => o.trim()),
       textoIA, anexo: nomeAnexo, criadoEm: new Date().toISOString(),
     });
-    toast("Relatório salvo com sucesso! ✓");
+    toast("Relatório salvo! ✓");
     setStep(1);
     setForm({ numeroAula: "", titulo: "", turma: "", equipe: "Equipe Ctrl+Play", data: new Date().toISOString().split("T")[0], objetivos: [""], tarefa: "" });
     setTextoIA(""); setArquivo(null);
   };
 
-  // ── PREVIEW ──
   if (step === 2) return (
     <div>
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
         <button onClick={() => setStep(1)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 20, color: sub }}>←</button>
         <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: text, margin: 0 }}>Prévia do Relatório</h1>
       </div>
-
       <Card dark={dark} style={{ marginBottom: 16 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
           <div style={{ fontSize: 13, fontWeight: 600, color: sub }}>MENSAGEM GERADA</div>
           <div style={{ display: "flex", gap: 10 }}>
-            <Btn onClick={copiar}  color="#25D366" small>{copied ? "✓ Copiado!" : "📋 Copiar"}</Btn>
-            <Btn onClick={salvar}  color="#3b82f6" small>💾 Salvar</Btn>
+            <Btn onClick={copiar} color="#25D366" small>{copied ? "✓ Copiado!" : "📋 Copiar"}</Btn>
+            <Btn onClick={salvar} color="#3b82f6" small>💾 Salvar</Btn>
           </div>
         </div>
         <pre style={{ whiteSpace: "pre-wrap", fontFamily: "inherit", fontSize: 14, color: text, lineHeight: 1.7, margin: 0, background: dark ? "#0f172a" : "#f8fafc", padding: 20, borderRadius: 10, border: `1px solid ${inputBorder}` }}>
           {mensagem}
         </pre>
       </Card>
-
       <Card dark={dark}>
         <div style={{ fontSize: 13, fontWeight: 600, color: sub, marginBottom: 12 }}>EDITAR TEXTO DA IA</div>
         <textarea value={textoIA} onChange={e => setTextoIA(e.target.value)}
@@ -341,7 +473,6 @@ function GerarRelatorio({ dark, onSave, toast }) {
     </div>
   );
 
-  // ── FORM ──
   return (
     <div>
       <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: text, margin: "0 0 24px", letterSpacing: -0.5 }}>Gerar Relatório</h1>
@@ -362,7 +493,6 @@ function GerarRelatorio({ dark, onSave, toast }) {
         <input style={inputStyle} value={form.titulo} onChange={e => setField("titulo", e.target.value)} placeholder="Ex: Autorização e Controle de Acesso com JWT" />
       </Card>
 
-      {/* FIX 3: turma agora é input de texto livre */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 16 }}>
         <Card dark={dark}>
           <label style={labelStyle}>Turma *</label>
@@ -394,21 +524,12 @@ function GerarRelatorio({ dark, onSave, toast }) {
         <input style={inputStyle} value={form.tarefa} onChange={e => setField("tarefa", e.target.value)} placeholder="Descreva a tarefa para os alunos..." />
       </Card>
 
-      {/* FIX 4: upload de arquivo real */}
       <Card dark={dark} style={{ marginBottom: 24 }}>
         <label style={labelStyle}>Anexo (opcional)</label>
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".pdf,.docx,.png,.jpg,.jpeg"
-          style={{ display: "none" }}
-          onChange={e => setArquivo(e.target.files[0] || null)}
-        />
+        <input ref={fileRef} type="file" accept=".pdf,.docx,.png,.jpg,.jpeg" style={{ display: "none" }} onChange={e => setArquivo(e.target.files[0] || null)} />
         {arquivo ? (
           <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", borderRadius: 9, border: `1.5px solid #25D366`, background: dark ? "#0f172a" : "#f0fdf4" }}>
-            <span style={{ fontSize: 20 }}>
-              {arquivo.name.endsWith(".pdf") ? "📄" : arquivo.name.match(/\.(png|jpg|jpeg)$/i) ? "🖼️" : "📎"}
-            </span>
+            <span style={{ fontSize: 20 }}>{arquivo.name.endsWith(".pdf") ? "📄" : arquivo.name.match(/\.(png|jpg|jpeg)$/i) ? "🖼️" : "📎"}</span>
             <span style={{ flex: 1, fontSize: 14, color: text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{arquivo.name}</span>
             <span style={{ fontSize: 12, color: sub, flexShrink: 0 }}>{(arquivo.size / 1024).toFixed(0)} KB</span>
             <button onClick={() => { setArquivo(null); fileRef.current.value = ""; }} style={{ background: "none", border: "none", cursor: "pointer", color: "#ef4444", fontSize: 18, padding: "0 4px", flexShrink: 0 }}>✕</button>
@@ -452,7 +573,11 @@ function Historico({ dark, reports, setReports, toast }) {
     setCopied(r.id); toast("Copiado!");
     setTimeout(() => setCopied(null), 2000);
   };
-  const deletar  = (id) => { setReports(p => p.filter(r => r.id !== id)); if (selected?.id === id) setSelected(null); toast("Excluído"); };
+  const deletar = async (id) => {
+    await setReports(id);
+    if (selected?.id === id) setSelected(null);
+    toast("Excluído");
+  };
   const exportTxt = (r) => {
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([gerarMensagem(r)], { type: "text/plain" }));
@@ -512,32 +637,39 @@ function Historico({ dark, reports, setReports, toast }) {
 }
 
 // ─── CONFIGURAÇÕES ───────────────────────────────────────────────────────────
-function Configuracoes({ dark, setDark, user, setUser, toast }) {
+function Configuracoes({ dark, setDark, user, toast }) {
   const text        = dark ? "#e2e8f0" : "#1e293b";
   const sub         = dark ? "#94a3b8" : "#64748b";
   const inputBg     = dark ? "#0f172a" : "#f8fafc";
   const inputBorder = dark ? "#334155" : "#e2e8f0";
   const inputStyle  = { width: "100%", padding: "10px 14px", borderRadius: 9, border: `1.5px solid ${inputBorder}`, background: inputBg, color: text, fontSize: 14, outline: "none", boxSizing: "border-box" };
-  const [form, setForm] = useState({ ...user });
+
+  const [nome, setNome] = useState(user.displayName || "");
+
+  const salvarNome = async () => {
+    try {
+      await updateProfile(auth.currentUser, { displayName: nome });
+      toast("Nome atualizado! ✓");
+    } catch {
+      toast("Erro ao salvar nome", "error");
+    }
+  };
 
   return (
     <div>
       <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 24, color: text, margin: "0 0 24px", letterSpacing: -0.5 }}>Configurações</h1>
+
       <Card dark={dark} style={{ marginBottom: 16 }}>
         <h2 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 700, color: text }}>Perfil</h2>
         <div style={{ marginBottom: 12 }}>
           <label style={{ fontSize: 12, color: sub, display: "block", marginBottom: 5 }}>Nome</label>
-          <input style={inputStyle} value={form.name} onChange={e => setForm(p => ({ ...p, name: e.target.value }))} />
-        </div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{ fontSize: 12, color: sub, display: "block", marginBottom: 5 }}>Email</label>
-          <input style={inputStyle} value={form.email} onChange={e => setForm(p => ({ ...p, email: e.target.value }))} />
+          <input style={inputStyle} value={nome} onChange={e => setNome(e.target.value)} />
         </div>
         <div style={{ marginBottom: 16 }}>
-          <label style={{ fontSize: 12, color: sub, display: "block", marginBottom: 5 }}>Nome da Equipe (padrão)</label>
-          <input style={inputStyle} value={form.team} onChange={e => setForm(p => ({ ...p, team: e.target.value }))} />
+          <label style={{ fontSize: 12, color: sub, display: "block", marginBottom: 5 }}>Email</label>
+          <input style={{ ...inputStyle, opacity: 0.6 }} value={user.email || ""} readOnly />
         </div>
-        <Btn onClick={() => { setUser(form); toast("Perfil salvo!"); }} color="#25D366">Salvar</Btn>
+        <Btn onClick={salvarNome} color="#25D366">Salvar Nome</Btn>
       </Card>
 
       <Card dark={dark}>
@@ -556,56 +688,40 @@ function Configuracoes({ dark, setDark, user, setUser, toast }) {
   );
 }
 
-// ─── LOGIN ───────────────────────────────────────────────────────────────────
-function Login({ onLogin, dark }) {
-  const [email, setEmail] = useState("joao@ctrlplay.com.br");
-  const [senha, setSenha] = useState("demo");
-  const bg          = dark ? "#0f172a" : "#f8fafc";
-  const text        = dark ? "#e2e8f0" : "#1e293b";
-  const inputBg     = dark ? "#1e293b" : "#fff";
-  const inputBorder = dark ? "#334155" : "#e2e8f0";
-  const inputStyle  = { width: "100%", padding: "12px 14px", borderRadius: 10, border: `1.5px solid ${inputBorder}`, background: inputBg, color: text, fontSize: 14, outline: "none", boxSizing: "border-box" };
-
-  return (
-    <div style={{ minHeight: "100vh", background: bg, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
-      <div style={{ width: "100%", maxWidth: 400 }}>
-        <div style={{ textAlign: "center", marginBottom: 36 }}>
-          <div style={{ width: 60, height: 60, background: "#25D366", borderRadius: 16, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, margin: "0 auto 16px" }}>📋</div>
-          <h1 style={{ fontFamily: "'Syne',sans-serif", fontWeight: 800, fontSize: 28, color: text, margin: "0 0 6px", letterSpacing: -1 }}>ClassReport</h1>
-          <p style={{ color: dark ? "#64748b" : "#94a3b8", margin: 0, fontSize: 14 }}>Sistema de Relatórios de Aulas</p>
-        </div>
-        <div style={{ background: dark ? "#1e293b" : "#fff", borderRadius: 16, padding: 28, border: `1px solid ${dark ? "#334155" : "#e5e7eb"}` }}>
-          <div style={{ marginBottom: 14 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: dark ? "#94a3b8" : "#64748b", display: "block", marginBottom: 6 }}>Email</label>
-            <input style={inputStyle} value={email} onChange={e => setEmail(e.target.value)} placeholder="seu@email.com" />
-          </div>
-          <div style={{ marginBottom: 22 }}>
-            <label style={{ fontSize: 12, fontWeight: 600, color: dark ? "#94a3b8" : "#64748b", display: "block", marginBottom: 6 }}>Senha</label>
-            <input type="password" style={inputStyle} value={senha} onChange={e => setSenha(e.target.value)} placeholder="••••••"
-              onKeyDown={e => e.key === "Enter" && onLogin()} />
-          </div>
-          <button onClick={onLogin} style={{ width: "100%", padding: "13px", background: "#25D366", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer" }}>
-            Entrar
-          </button>
-          <p style={{ textAlign: "center", fontSize: 12, color: dark ? "#64748b" : "#94a3b8", marginTop: 14, marginBottom: 0 }}>
-            Demo: qualquer email/senha funciona
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // ─── APP ─────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [dark, setDark]       = useState(false);
-  const [logado, setLogado]   = useState(false);
-  const [page, setPage]       = useState("dashboard");
+  const [dark, setDark]         = useState(false);
+  const [user, setUser]         = useState(null);       // Firebase user object
+  const [authReady, setAuthReady] = useState(false);    // esperando onAuthStateChanged
+  const [page, setPage]         = useState("dashboard");
   const [sideOpen, setSideOpen] = useState(false);
-  const [mobile, setMobile]   = useState(window.innerWidth < 768);
-  const [reports, setReports] = useState(INITIAL_REPORTS);
-  const [user, setUser]       = useState(MOCK_USER);
+  const [mobile, setMobile]     = useState(window.innerWidth < 768);
+  const [reports, setReports]   = useState([]);
   const { toasts, add: toast, remove } = useToast();
+
+  // Observa mudanças de autenticação
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setAuthReady(true);
+    });
+    return unsub;
+  }, []);
+
+  // Carrega relatórios do Firestore quando user loga
+  useEffect(() => {
+    if (!user) { setReports([]); return; }
+    const load = async () => {
+      try {
+        const col = collection(db, "users", user.uid, "reports");
+        const snap = await getDocs(query(col, orderBy("criadoEm", "asc")));
+        setReports(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      } catch (e) {
+        console.error("Erro ao carregar relatórios:", e);
+      }
+    };
+    load();
+  }, [user]);
 
   useEffect(() => {
     const fn = () => setMobile(window.innerWidth < 768);
@@ -613,34 +729,75 @@ export default function App() {
     return () => window.removeEventListener("resize", fn);
   }, []);
 
-  // FIX 1: logout limpa estado e volta para tela de login
-  const handleLogout = () => {
-    setLogado(false);
+  const handleLogout = async () => {
+    await signOut(auth);
     setPage("dashboard");
     setSideOpen(false);
+  };
+
+  // Salva relatório no Firestore
+  const handleSaveReport = async (data) => {
+    try {
+      const col = collection(db, "users", user.uid, "reports");
+      const ref = await addDoc(col, data);
+      setReports(p => [...p, { id: ref.id, ...data }]);
+    } catch (e) {
+      toast("Erro ao salvar no Firestore: " + e.message, "error");
+    }
+  };
+
+  // Deleta relatório no Firestore (recebe o id)
+  const handleDeleteReport = async (id) => {
+    try {
+      await deleteDoc(doc(db, "users", user.uid, "reports", id));
+      setReports(p => p.filter(r => r.id !== id));
+    } catch (e) {
+      toast("Erro ao excluir: " + e.message, "error");
+    }
   };
 
   const bg   = dark ? "#0a1628" : "#f1f5f9";
   const text = dark ? "#e2e8f0" : "#1e293b";
 
-  if (!logado) return (
+  const globalStyle = `
+    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
+    * { font-family: 'Syne', sans-serif; box-sizing: border-box; }
+    input, select, textarea, button { font-family: 'Syne', sans-serif !important; }
+    @keyframes slideIn { from { transform: translateX(40px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
+  `;
+
+  // Aguardando Firebase inicializar
+  if (!authReady) return (
     <>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap'); *{font-family:'Syne',sans-serif;} @keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}`}</style>
-      <Login onLogin={() => setLogado(true)} dark={dark} />
+      <style>{globalStyle}</style>
+      <div style={{ minHeight: "100vh", background: dark ? "#0f172a" : "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center" }}>
+        <div style={{ textAlign: "center", color: dark ? "#64748b" : "#94a3b8" }}>
+          <div style={{ fontSize: 40, marginBottom: 12 }}>📋</div>
+          <div style={{ fontSize: 14 }}>Carregando...</div>
+        </div>
+      </div>
+    </>
+  );
+
+  // Não autenticado — mostra tela de login/cadastro
+  if (!user) return (
+    <>
+      <style>{globalStyle}</style>
+      <AuthScreen dark={dark} />
+      <Toast toasts={toasts} remove={remove} />
     </>
   );
 
   const pages = {
     dashboard: <Dashboard dark={dark} reports={reports} setPage={setPage} />,
-    gerar:     <GerarRelatorio dark={dark} onSave={r => setReports(p => [...p, r])} toast={toast} />,
-    historico: <Historico dark={dark} reports={reports} setReports={setReports} toast={toast} />,
-    config:    <Configuracoes dark={dark} setDark={setDark} user={user} setUser={setUser} toast={toast} />,
+    gerar:     <GerarRelatorio dark={dark} onSave={handleSaveReport} toast={toast} />,
+    historico: <Historico dark={dark} reports={reports} setReports={handleDeleteReport} toast={toast} />,
+    config:    <Configuracoes dark={dark} setDark={setDark} user={user} toast={toast} />,
   };
 
   return (
     <>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap'); *{font-family:'Syne',sans-serif;box-sizing:border-box;} @keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}} input,select,textarea,button{font-family:'Syne',sans-serif!important;}`}</style>
-
+      <style>{globalStyle}</style>
       <div style={{ display: "flex", height: "100vh", overflow: "hidden", background: bg }}>
         <Sidebar
           page={page} setPage={setPage}
@@ -649,7 +806,6 @@ export default function App() {
           mobile={mobile} open={sideOpen} setOpen={setSideOpen}
           onLogout={handleLogout}
         />
-
         <div style={{ flex: 1, overflow: "auto", display: "flex", flexDirection: "column" }}>
           {mobile && (
             <div style={{ padding: "14px 16px", background: dark ? "#1e293b" : "#fff", borderBottom: `1px solid ${dark ? "#334155" : "#e5e7eb"}`, display: "flex", alignItems: "center", gap: 12, position: "sticky", top: 0, zIndex: 50 }}>
@@ -662,7 +818,6 @@ export default function App() {
           </div>
         </div>
       </div>
-
       <Toast toasts={toasts} remove={remove} />
     </>
   );

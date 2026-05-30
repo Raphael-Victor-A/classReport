@@ -50,7 +50,7 @@ Objetivos: ${objetivos.join("; ")}${tarefa ? ` | Tarefa: ${tarefa}` : ""}`;
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: { maxOutputTokens: 650, temperature: 0.7 },
+        generationConfig: { maxOutputTokens: 1000, temperature: 0.7 },
       }),
     }
   );
@@ -759,12 +759,13 @@ export default function App() {
   const bg   = dark ? "#0a1628" : "#f1f5f9";
   const text = dark ? "#e2e8f0" : "#1e293b";
 
-  const globalStyle = `
-    @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
-    * { font-family: 'Syne', sans-serif; box-sizing: border-box; }
-    input, select, textarea, button { font-family: 'Syne', sans-serif !important; }
-    @keyframes slideIn { from { transform: translateX(40px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
-  `;
+ const globalStyle = `
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+  *, html, body, #root { font-family: 'Inter', sans-serif; box-sizing: border-box; margin: 0; padding: 0; }
+  html, body, #root { height: 100%; width: 100%; }
+  input, select, textarea, button { font-family: 'Inter', sans-serif !important; }
+  @keyframes slideIn { from { transform: translateX(40px); opacity: 0 } to { transform: translateX(0); opacity: 1 } }
+`;
 
   // Aguardando Firebase inicializar
   if (!authReady) return (

@@ -48,17 +48,19 @@ async function gerarTextoIA({ numeroAula, titulo, turma, objetivos, tarefa }) {
 Aula ${numeroAula} – ${titulo} | Turma: ${turma}
 Objetivos: ${objetivos.join("; ")}${tarefa ? ` | Tarefa: ${tarefa}` : ""}`;
 
-  const resp = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-20250514",
-      max_tokens: 300,
-      messages: [{ role: "user", content: prompt }],
-    }),
-  });
+  const resp = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${import.meta.env.VITE_GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }],
+        generationConfig: { maxOutputTokens: 300, temperature: 0.7 },
+      }),
+    }
+  );
   const data = await resp.json();
-  return data.content?.map(b => b.text || "").join("").trim() || "Texto não gerado.";
+  return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Texto não gerado.";
 }
 
 // ─── TOAST ───────────────────────────────────────────────────────────────────
